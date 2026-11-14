@@ -114,6 +114,18 @@ def api(cfg):
     return len(result.get("data") or [])
 
 
+def check_ports(ports):
+    # Linux requires reuse on both old and new sockets to rebind TIME_WAIT.
+    # SO_REUSEPORT is deliberately absent: a live listener must still fail.
+    for port in ports:
+        with socket.socket() as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("127.0.0.1", port))
+            except OSError as ex:
+                raise RuntimeError(f"Port preflight failed at 127.0.0.1:{port}: {ex}") from ex
+
+
 def execute(action, name):
     folder, config, cfg, binary = config_for(name)
     statepath = folder / "process.json"
@@ -156,9 +168,7 @@ def execute(action, name):
     if actual != rev:
         raise RuntimeError("Source HEAD does not match lock")
     # Preflight is advisory; actual bind and API readiness remain authoritative.
-    for port in PORTS[name]:
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", port))
+    check_ports(PORTS[name])
     (folder / "logs").mkdir(exist_ok=True)
     args = [str(binary), "-c", str(config), "--log-dir", str(folder / "logs"), "-t", "2"]
     with (folder / "console.log").open("ab") as out:
