@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MediaGateway · 流管理</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><header><div class="brand">MG <span>MediaGateway</span></div><nav>流管理 <span>实验工作台 · v0.1</span></nav><span id="connection" role="status">正在连接…</span></header>
+<main><div class="heading"><div><p class="eyebrow">媒体接入 / 状态观测</p><h1>流管理工作台</h1><p>接入 RTSP，查看协议分发与真实媒体状态。</p></div><button id="refresh" class="secondary">立即刷新</button></div>
+<div id="notice" role="status" aria-live="polite"></div>
+<section class="stats" aria-label="概览"><article><span>在线媒体流</span><strong id="online">—</strong><small>按 vhost / app / stream 去重</small></article><article><span>本界面管理的任务</span><strong id="taskCount">—</strong><small>任务存在不等于媒体在线</small></article><article><span>RTP 质量指标</span><strong class="unavailable">尚未接入</strong><small>丢包 / 乱序 / Jitter 待 C++ 扩展</small></article></section>
+<div class="workspace"><div><section class="panel"><div class="section-head"><h2>在线媒体流</h2><span id="updated">等待首次采集</span></div><p class="hint">每 3 秒刷新。观看人数是 API 报告的跨协议总读者数，不等于独立用户数，也不跨协议累加。</p><div class="table-wrap"><table><thead><tr><th>应用 / 流标识</th><th>协议</th><th>总读者数</th><th>详情</th></tr></thead><tbody id="streams"><tr><td colspan="4">正在加载真实数据…</td></tr></tbody></table></div></section>
+<section class="panel"><div class="section-head"><h2>拉流任务</h2><span>仅可删除本界面创建的任务</span></div><div id="tasks" class="tasks">正在加载…</div></section></div>
+<aside><section class="panel"><h2>新增 RTSP 拉流</h2><p class="hint">调用网关现有拉流能力，启用 RTSP / RTMP / HLS。地址仅发送到后端，不保存到任务文件。</p><form id="add"><label for="name">任务名称</label><input id="name" name="name" maxlength="64" required placeholder="例如：本机测试视频"><label for="url">RTSP 地址</label><input id="url" name="url" type="text" required maxlength="2048" autocomplete="off" placeholder="rtsp://127.0.0.1:18554/live/demo"><button id="submit" type="submit">创建拉流任务</button></form><p class="hint">使用上游重连机制；网关重启后本版不会自动恢复拉流，需要删除旧记录后重建。</p></section>
+<section class="panel"><h2>媒体详情</h2><div id="detail" class="detail">选择一条在线流查看轨道。媒体已注册不代表浏览器播放通过。</div></section></aside></div>
+<footer>数据来源：ZLMediaKit HTTP API · 浏览器播放器尚未接入 · 本版本仅用于本地实验，通过 SSH 隧道访问</footer></main></body></html>
