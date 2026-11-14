@@ -16,7 +16,7 @@
 
 原则：复用上游、分阶段迭代、先声明变更文件和调用链、每项有测试与日志、每次改动提交 Git、不虚构性能结果。
 
-公开仓库：https://github.com/Zhaokangbo/MediaGateway 。各阶段使用独立 Git Commit 保留改动和真实验证记录，不提交运行凭据或原始日志。上游完整源码尚未取得，后续按 lock 取回并递归核对子模块；当前 lock 不是完整可复现依赖清单，构建任务需补全。
+公开仓库：https://github.com/Zhaokangbo/MediaGateway 。各阶段使用独立 Git Commit 保留改动和真实验证记录，不提交运行凭据或原始日志。用户侧已按固定版本完成源码获取及构建；当前 lock 尚不是完整可复现依赖清单，递归依赖和操作系统包版本以构建产物中的清单为准。
 
 项目自有代码采用 MIT 许可证，见 LICENSE。ZLMediaKit、ZLToolKit、PyMKUI 及其依赖保留各自的许可证和版权声明，本仓库不重新授权第三方代码。
 
