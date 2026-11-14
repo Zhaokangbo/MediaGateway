@@ -10,6 +10,7 @@
 - [T1 实际验证记录](docs/experiments/t1-environment.md)
 - [T2 双实例生命周期验证](docs/runbooks/t2-instances.md)
 - [T2 重启故障修复与实测结果](docs/experiments/t2-restart.md)
+- [T3 RTSP 接入与解码验收（脚本已准备，Ubuntu 待执行）](docs/runbooks/t3-rtsp.md)
 
 在 Ubuntu 项目目录执行 `bash scripts/bootstrap-ubuntu.sh --check` 检查依赖；安装依赖后执行 `JOBS=2 bash scripts/build-zlm.sh`。详细说明见接入文档。
 
