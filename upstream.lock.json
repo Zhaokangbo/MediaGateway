@@ -1,0 +1,39 @@
+{
+  "survey_date": "2026-11-14",
+  "status": "source-reviewed-not-built",
+  "repositories": {
+    "ZLMediaKit": {
+      "url": "https://github.com/ZLMediaKit/ZLMediaKit",
+      "commit": "fb3265725f0880da1f52a3cc6e6eb04bbc327fa3"
+    },
+    "ZLToolKit": {
+      "url": "https://github.com/ZLMediaKit/ZLToolKit",
+      "commit": "d7d601200f65f3111dbf9d20ed7f14d2654bbd6e",
+      "selection": "ZLMediaKit gitlink; do not replace with repository HEAD"
+    },
+    "pymkui": {
+      "url": "https://github.com/ZLMediaKit/pymkui",
+      "commit": "aaba4f0fbd183ea964d74a1f64549fb2208fdbdc",
+      "status": "optional integration candidate; compatibility untested"
+    }
+  },
+  "submodules": [
+    {
+      "path": "3rdpart/ZLToolKit",
+      "commit": "d7d601200f65f3111dbf9d20ed7f14d2654bbd6e"
+    },
+    {
+      "path": "3rdpart/jsoncpp",
+      "commit": "ca98c98457b1163cca1f7d8db62827c115fec6d1"
+    },
+    {
+      "path": "3rdpart/media-server",
+      "commit": "21c4451ff2e4c4bb1c817e606c8b4e5deac1e719"
+    },
+    {
+      "path": "3rdpart/pybind11",
+      "commit": "ed5057ded698e305210269dafa57574ecf964483"
+    }
+  ],
+  "submodule_manifest_complete": false
+}

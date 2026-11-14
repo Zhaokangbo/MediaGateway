@@ -1,0 +1,11 @@
+upstream/
+build/
+runtime/
+artifacts/
+.env
+.env.*
+!.env.example
+config/*.local.ini
+*.pcap
+*.pcapng
+__pycache__/
