@@ -2,13 +2,14 @@
 
 基于 ZLMediaKit 的多协议流媒体网关学习与工程实践项目。
 
-当前阶段：用户在 Ubuntu 24.04.4 已编译出 MediaServer，二进制哈希及证据见 T1 验证记录。T2 双实例启停脚本已准备，实际启动、API、播放与重连待验证。
+当前阶段：用户在 Ubuntu 24.04.4 已编译出 MediaServer，二进制哈希及证据见 T1 验证记录。T2 已通过 Linux 端口回归测试与双实例连续三轮启动、API、重复启动和停止验证；媒体输入、播放与重连尚未验证。
 
 - [架构、源码证据与任务计划](docs/phase-01-architecture.md)
 - [固定上游版本](upstream.lock.json)
 - [VMware Ubuntu 接入与构建](docs/runbooks/vmware-ubuntu-setup.md)
 - [T1 实际验证记录](docs/experiments/t1-environment.md)
 - [T2 双实例生命周期验证](docs/runbooks/t2-instances.md)
+- [T2 重启故障修复与实测结果](docs/experiments/t2-restart.md)
 
 在 Ubuntu 项目目录执行 `bash scripts/bootstrap-ubuntu.sh --check` 检查依赖；安装依赖后执行 `JOBS=2 bash scripts/build-zlm.sh`。详细说明见接入文档。
 

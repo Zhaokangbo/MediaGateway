@@ -25,5 +25,20 @@ Linux 上此前连接留下的 TIME_WAIT 可导致该预检失败，即使监听
 随后连续三轮执行 start/status/start/stop，均须成功，停止后检查业务端口无 LISTEN。
 保存测试与生命周期日志至 artifacts/t2；原始运行产物不上传公开仓库。
 
-本次本地仅验证 Python 语法。Windows 不具备 Linux socket 语义，
-Linux 回归与真实 MediaServer 连续重启结果待用户执行，不能记为通过。
+修复提交时本地仅验证 Python 语法。Windows 不具备 Linux socket 语义。
+
+## 修复后的实际结果（2026-11-14）
+
+证据来源：用户在 Ubuntu 执行修复版后贴回的终端输出，并非代理本地执行。
+test_listener_and_time_wait 显示 ok，Ran 1 test in 0.001s，最终 OK，无跳过。
+
+| 轮次 | source PID | gateway PID | 结果 |
+| --- | --- | --- | --- |
+| 1 | 6137 | 6146 | 启动、API、状态、重复启动抑制、停止均成功 |
+| 2 | 6166 | 6174 | 启动、API、状态、重复启动抑制、停止均成功 |
+| 3 | 6194 | 6202 | 启动、API、状态、重复启动抑制、停止均成功 |
+
+最终 ss -ltnp 输出无 8554、18554、18080、18081、1935、11935 监听。
+T2 连续重启验收通过。所有 API 返回 media_sources=0，符合尚未接入媒体的状态。
+日志由用户命令保存到 artifacts/t2/retest-<UTC时间>.log，具体文件名未提供。
+该结果不代表 RTSP 输入、多协议播放、观看人数或故障重连已通过。
