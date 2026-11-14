@@ -32,3 +32,13 @@ bootstrap-ubuntu.sh 的 apt-get install 增加 -o DPkg::Lock::Timeout=300，最�
 - 日志未显示实际等待锁的过程，因此仅确认正常安装路径成功；锁持续占用直到超时的分支未实测。
 - build-zlm.sh 在 git clone 处退出 128：Recv failure，连接被对方重置。尚未执行 checkout、子模块初始化和 CMake。
 - 最新状态：环境 PASS；源码获取 BLOCKED（网络）；构建 NOT RUN；播放测试 NOT RUN。
+
+## 编译成功（用户终端证据）
+
+使用命令级 Git 代理后，构建脚本已输出 PASS: MediaServer target compiled。此结果来自用户提供的终端末尾输出。
+
+- 二进制：upstream/ZLMediaKit/release/linux/RelWithDebInfo/MediaServer。
+- SHA-256：14a6548d2fa1ddaf33afed40876f7927cf055ed60cec9decbe38b77236343c2f。
+- 用户侧构建证据目录：artifacts/build/20261114T091230Z-3765。
+- 最新状态：编译 PASS；服务启动/API/RTSP 输入/播放/重连 NOT TESTED。完整编译日志、递归子模块清单尚未由代理逐项复核。
+
