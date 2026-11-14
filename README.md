@@ -2,7 +2,7 @@
 
 基于 ZLMediaKit 的多协议流媒体网关学习与工程实践项目。
 
-当前阶段：用户在 Ubuntu 24.04.4 完成 T1 构建、T2 连续重启、T3 RTSP 接入与 T4 四协议解码验收。独立管理工作台 v0.1 已实现，等待 Ubuntu HTTP/页面联调；浏览器播放、观看人数、重连和延迟尚未验证。
+当前阶段：用户在 Ubuntu 24.04.4 完成 T1 构建、T2 连续重启、T3 RTSP 接入与 T4 四协议解码验收，并通过截图确认 v0.1 管理页面真实拉流与流状态。v0.2 浏览器 HLS 播放已实现待验收；观看人数变化、重连和延迟尚未验证。
 
 - [架构、源码证据与任务计划](docs/phase-01-architecture.md)
 - [固定上游版本](upstream.lock.json)
@@ -15,6 +15,7 @@
 - [T4 多协议播放验收](docs/runbooks/t4-playback.md)
 - [T4 实测记录](docs/experiments/t4-playback.md)
 - [管理工作台 v0.1：部署、边界与验收](docs/runbooks/management-v01.md)
+- [管理工作台 v0.2：HLS 播放与读者数观测](docs/runbooks/management-v02.md)
 
 在 Ubuntu 项目目录执行 `bash scripts/bootstrap-ubuntu.sh --check` 检查依赖；安装依赖后执行 `JOBS=2 bash scripts/build-zlm.sh`。详细说明见接入文档。
 

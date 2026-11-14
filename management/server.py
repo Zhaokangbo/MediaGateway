@@ -4,16 +4,40 @@ import argparse
 import configparser
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = Path(__file__).resolve().parent / "web"
+
+
+def media_route(path, tasks):
+    parts = urllib.parse.urlsplit(path)
+    chunks = parts.path.split("/")
+    if parts.query or len(chunks) < 5 or chunks[1] != "media":
+        raise ValueError("Invalid media path")
+    identifier, session = chunks[2:4]
+    if not re.fullmatch(r"[0-9a-f]{32}", identifier) or not re.fullmatch(r"[0-9a-f]{32}", session):
+        raise ValueError("Invalid session")
+    task = tasks.get(identifier)
+    if not task:
+        raise ValueError("Not an owned task")
+    files = chunks[4:]
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", part) or part in (".", "..") for part in files):
+        raise ValueError("Invalid segment")
+    if not files[-1].endswith((".m3u8", ".ts")):
+        raise ValueError("Only HLS TS is supported")
+    # Derive path from the generated ID, never from a caller-supplied URL.
+    upstream = "/mgui/ui_" + identifier + "/" + "/".join(files)
+    return upstream, f"/media/{identifier}/{session}/"
 
 
 def group_media(rows):
@@ -152,14 +176,16 @@ def handler(controller, port):
             # Never log URLs or bodies (may contain source credentials).
             print(f"management: {self.command} completed", flush=True)
 
-        def send(self, code, value, content_type="application/json; charset=utf-8"):
+        def send(self, code, value, content_type="application/json; charset=utf-8", cookie=None):
             payload = json.dumps(value, ensure_ascii=False).encode() if isinstance(value, dict) else value
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'")
+            if cookie:
+                self.send_header("Set-Cookie", cookie)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -173,6 +199,8 @@ def handler(controller, port):
                 result = controller.snapshot()
                 result["token"] = token
                 return self.send(200, result)
+            if self.path.startswith("/media/"):
+                return self.media()
             files = {"/": ("index.html", "text/html; charset=utf-8"),
                      "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                      "/style.css": ("style.css", "text/css; charset=utf-8")}
@@ -180,6 +208,42 @@ def handler(controller, port):
                 return self.send(404, {"error": "Not found"})
             name, mime = files[self.path]
             self.send(200, (STATIC / name).read_bytes(), mime)
+
+        def media(self):
+            try:
+                with controller.lock:
+                    path, cookie_path = media_route(self.path, controller.tasks)
+            except ValueError:
+                return self.send(404, {"error": "媒体路径或任务无效"})
+            try:
+                headers = {}
+                incoming = SimpleCookie(self.headers.get("Cookie", ""))
+                if "ZLM_HTTP_COOKIE" in incoming:
+                    headers["Cookie"] = "ZLM_HTTP_COOKIE=" + incoming["ZLM_HTTP_COOKIE"].coded_value
+                req = urllib.request.Request(f"http://127.0.0.1:{controller.gateway.port}" + path, headers=headers)
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open(req, timeout=10) as response:
+                    payload = response.read(16 * 1024 * 1024 + 1)
+                    if len(payload) > 16 * 1024 * 1024:
+                        raise RuntimeError("Segment exceeds preview limit")
+                    cookie = SimpleCookie(response.headers.get("Set-Cookie", ""))
+                    outgoing = None
+                    if "ZLM_HTTP_COOKIE" in cookie:
+                        item = cookie["ZLM_HTTP_COOKIE"]
+                        item["path"] = cookie_path
+                        item["httponly"] = True
+                        item["samesite"] = "Strict"
+                        if item["domain"]:
+                            del item["domain"]
+                        outgoing = item.OutputString()
+                    mime = "application/vnd.apple.mpegurl" if path.endswith(".m3u8") else "video/mp2t"
+                self.send(200, payload, mime, outgoing)
+            except urllib.error.HTTPError as ex:
+                self.send(ex.code if ex.code in (403, 404) else 502, {"error": "HLS 资源尚未就绪或不可用"})
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except Exception:
+                self.send(502, {"error": "HLS 转发失败或超时"})
 
         def do_POST(self):
             if not self.allowed_host() or self.headers.get("Origin") != origin or not secrets.compare_digest(

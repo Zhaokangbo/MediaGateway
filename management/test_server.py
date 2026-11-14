@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-from server import Controller, group_media, handler
+from server import Controller, group_media, handler, media_route
 
 TEST_ROOT = Path(__file__).resolve().parent.parent / "artifacts/management-tests"
 TEST_ROOT.mkdir(parents=True, exist_ok=True)
@@ -28,6 +28,19 @@ class FakeGateway:
 
 
 class ConsoleTests(unittest.TestCase):
+    def test_media_route_boundaries(self):
+        identifier = "a" * 32
+        session = "b" * 32
+        prefix = f"/media/{identifier}/{session}/"
+        tasks = {identifier: {"app": "mgui", "stream": "ui_" + identifier}}
+        self.assertEqual(media_route(prefix + "2026-11-14/17-30-00_0.ts", tasks)[0],
+                         "/mgui/ui_" + identifier + "/2026-11-14/17-30-00_0.ts")
+        for suffix in ("../config.ini", "%2e%2e/x.ts", "//other/x.ts", "hls.m3u8?url=http://evil", "secret.ini"):
+            with self.assertRaises(ValueError):
+                media_route(prefix + suffix, tasks)
+        with self.assertRaises(ValueError):
+            media_route(prefix + "hls.m3u8", {})
+
     def test_no_double_count_and_missing_value(self):
         base = dict(vhost="v", app="a", stream="s", totalReaderCount=3)
         rows = group_media([dict(base, schema="rtsp"), dict(base, schema="rtmp")])
