@@ -10,6 +10,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 import uuid
 
 from instances import ROOT, config_for, owned
@@ -30,22 +31,27 @@ def decoded_counts(text):
 
 def run():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument("--stage", choices=("t3", "t4"), default="t3")
+    args = parser.parse_args()
     if not sys.platform.startswith("linux"):
         parser.error("Run on Ubuntu with the T2 instances started")
     if not shutil.which("ffmpeg"):
         parser.error("ffmpeg is required")
     os.umask(0o077)
     tag = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:12]
-    evidence = ROOT / "artifacts/t3" / tag
+    evidence = ROOT / "artifacts" / args.stage / tag
     evidence.mkdir(parents=True)
     configs = {}
     publisher = None
     proxy_attempted = False
     proxy_key = None
-    stream = "t3_" + uuid.uuid4().hex
+    stream = args.stage + "_" + uuid.uuid4().hex
     params = {"vhost": "__defaultVhost__", "app": "mgtest", "stream": stream}
-    summary = {"stage": "T3", "stream": stream, "status": "FAIL", "cleanup_errors": []}
+    summary = {"stage": args.stage.upper(), "stream": stream, "status": "FAIL", "cleanup_errors": [], "protocols": {}}
+    # FFmpeg HTTP inputs must stay local even when the shell uses a proxy.
+    media_env = {k: v for k, v in os.environ.items() if k.lower() not in
+                 ("http_proxy", "https_proxy", "all_proxy")}
+    media_env.update(no_proxy="127.0.0.1,localhost", NO_PROXY="127.0.0.1,localhost")
 
     def save(name, value):
         (evidence / name).write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
@@ -84,6 +90,26 @@ def run():
             time.sleep(0.5)
         raise RuntimeError(instance + " RTSP registration timed out")
 
+    def wait_hls(url):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            if publisher.poll() is not None:
+                raise RuntimeError("Publisher exited while waiting for HLS")
+            try:
+                with opener.open(url, timeout=3) as response:
+                    playlist = response.read().decode("utf-8")
+                (evidence / "hls-playlist.m3u8").write_text(playlist, encoding="utf-8")
+                if playlist.startswith("#EXTM3U") and "#EXTINF:" in playlist:
+                    return
+            except urllib.error.HTTPError as ex:
+                if ex.code != 404:
+                    raise
+            except (TimeoutError, urllib.error.URLError):
+                pass
+            time.sleep(0.5)
+        raise RuntimeError("HLS playlist with media segments not ready within 45 seconds")
+
     log("Evidence: " + str(evidence))
     try:
         for name in ("source", "gateway"):
@@ -107,7 +133,7 @@ def run():
                    "-f", "rtsp", "-rtsp_transport", "tcp", source_url]
         save("publisher-command.json", command)
         with (evidence / "publisher.log").open("wb") as out:
-            publisher = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=out)
+            publisher = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out, stderr=out, env=media_env)
         wait_media("source")
         proxy_attempted = True
         proxy_key = "__defaultVhost__/mgtest/" + stream
@@ -116,25 +142,47 @@ def run():
                      enable_rtmp=1, enable_hls=1, enable_mp4=0, auto_close=0), "proxy-add.json")
         proxy_key = result["data"]["key"]
         wait_media("gateway")
-        command = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info", "-xerror",
-                   "-rtsp_transport", "tcp", "-i", gateway_url,
-                   "-map", "0:v:0", "-map", "0:a:0", "-t", "5",
-                   "-c:v", "rawvideo", "-threads:v", "1", "-c:a", "pcm_s16le",
-                   "-f", "framemd5", str(evidence / "decoded.framemd5")]
-        save("decoder-command.json", command)
-        with (evidence / "decoder.log").open("wb") as out:
-            subprocess.run(command, stdout=out, stderr=out, stdin=subprocess.DEVNULL,
-                           check=True, timeout=40)
-        counts = decoded_counts((evidence / "decoded.framemd5").read_text())
-        if counts[0] < 100 or counts[1] < 100:
-            raise RuntimeError(f"Insufficient decoded output: {counts}")
-        if publisher.poll() is not None:
-            raise RuntimeError("Publisher exited during decode")
-        summary["decoded_video_frames"] = counts[0]
-        summary["decoded_audio_blocks"] = counts[1]
+        targets = {"rtsp": gateway_url}
+        if args.stage == "t4":
+            targets.update(rtmp=f"rtmp://127.0.0.1:1935/mgtest/{stream}",
+                           http_flv=f"http://127.0.0.1:18080/mgtest/{stream}.live.flv",
+                           hls=f"http://127.0.0.1:18080/mgtest/{stream}/hls.m3u8")
+        save("playback-urls.json", targets)
+        for protocol, url in targets.items():
+            prefix = "" if args.stage == "t3" else protocol + "-"
+            result = {"status": "FAIL"}
+            summary["protocols"][protocol] = result
+            try:
+                log("Testing: " + protocol)
+                if protocol == "hls":
+                    wait_hls(url)
+                command = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info", "-xerror"]
+                if protocol == "rtsp":
+                    command += ["-rtsp_transport", "tcp"]
+                command += ["-i", url, "-map", "0:v:0", "-map", "0:a:0", "-t", "5",
+                            "-c:v", "rawvideo", "-threads:v", "1", "-c:a", "pcm_s16le",
+                            "-f", "framemd5", str(evidence / (prefix + "decoded.framemd5"))]
+                save(prefix + "decoder-command.json", command)
+                with (evidence / (prefix + "decoder.log")).open("wb") as out:
+                    subprocess.run(command, stdout=out, stderr=out, stdin=subprocess.DEVNULL,
+                                   check=True, timeout=40, env=media_env)
+                counts = decoded_counts((evidence / (prefix + "decoded.framemd5")).read_text())
+                if counts[0] < 100 or counts[1] < 100:
+                    raise RuntimeError(f"Insufficient decoded output: {counts}")
+                if publisher.poll() is not None:
+                    raise RuntimeError("Publisher exited during decode")
+                result.update(status="PASS", decoded_video_frames=counts[0], decoded_audio_blocks=counts[1])
+                if args.stage == "t3":
+                    summary.update(decoded_video_frames=counts[0], decoded_audio_blocks=counts[1])
+                log(f"PASS: {protocol} decoded video_frames={counts[0]}, audio_blocks={counts[1]}")
+            except Exception as ex:
+                result["error"] = f"{type(ex).__name__}: {ex}"
+                log(f"FAIL: {protocol}: {result['error']}")
+            save("summary.json", summary)
+        if any(item["status"] != "PASS" for item in summary["protocols"].values()):
+            raise RuntimeError("One or more playback protocols failed; inspect per-protocol logs")
         api("gateway", "getMediaList", params, "gateway-all-schemas.json")
         summary["status"] = "PASS"
-        log(f"PASS: gateway decoded video_frames={counts[0]}, audio_blocks={counts[1]}")
     except (Exception, KeyboardInterrupt) as ex:
         summary["error"] = f"{type(ex).__name__}: {ex}"
         log("FAIL: " + summary["error"])
@@ -168,8 +216,9 @@ def run():
         if summary["cleanup_errors"]:
             summary["status"] = "FAIL"
         save("summary.json", summary)
-        log(summary["status"] + ": T3; details in summary.json")
-        log("NOT TESTED: RTMP/HTTP-FLV/HLS playback, viewer counts, reconnection, latency")
+        log(summary["status"] + ": " + summary["stage"] + "; details in summary.json")
+        log("NOT TESTED: " + ("RTMP/HTTP-FLV/HLS playback, " if args.stage == "t3" else "")
+            + "browser playback, viewer counts, reconnection, latency")
     return 0 if summary["status"] == "PASS" else 1
 
 
