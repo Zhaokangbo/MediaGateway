@@ -9,7 +9,8 @@ async function post(path, body) {
 }
 function detail(item) {
   selected = [item.vhost,item.app,item.stream].join('/');
-  el('detail').replaceChildren(node('b', `${item.app} / ${item.stream}`), node('p', `vhost：${item.vhost}`), node('p','媒体已注册 · 播放尚未验证'));
+  const observed = displayedStreams.has([item.vhost,item.app,item.stream].join('/'));
+  el('detail').replaceChildren(node('b', `${item.app} / ${item.stream}`), node('p', `vhost：${item.vhost}`), node('p',observed ? '媒体已注册 · 本页已观察到视频帧（不代表持续流畅）' : '媒体已注册 · 本页尚未观察到视频帧'));
   if (!item.tracks.length) el('detail').append(node('p','暂无轨道数据'));
   for (const track of item.tracks) el('detail').append(node('pre', JSON.stringify(track, null, 2)));
 }
@@ -57,7 +58,8 @@ async function refresh() {
 el('refresh').onclick=refresh;
 el('add').onsubmit=async event=>{event.preventDefault();el('submit').disabled=true;notice('正在提交拉流请求，最多等待约 15 秒…');try{const result=await post('/api/tasks',{name:el('name').value,url:el('url').value.trim()});el('url').value='';notice(result.task.state);await refresh();}catch(e){notice(e.message);}finally{el('submit').disabled=false;}};
 const video=el('video');
-let player=null, generation=0, activeTask=null, observedTask=null, readyTimer=null, frameCallback=null, libraryPromise=null;
+let player=null, generation=0, activeTask=null, observedTask=null, readyTimer=null, frameCallback=null, libraryPromise=null, frameShown=false;
+const displayedStreams=new Set();
 const events=[];
 function record(event, data={}) {events.push({time:new Date().toISOString(),event,...data});if(events.length>600) events.shift();}
 function playerState(message) {el('playerState').textContent=message;record('state',{message,task:activeTask});}
@@ -80,16 +82,16 @@ function loadLibrary() {
   }).catch(e=>{libraryPromise=null;throw e;});return libraryPromise;
 }
 async function startPlayer(task) {
-  stopPlayer('准备播放…');activeTask=task.id;observedTask=task.id;el('playerName').textContent=task.name;
+  stopPlayer('准备播放…');frameShown=false;activeTask=task.id;observedTask=task.id;el('playerName').textContent=task.name;
   const current=generation;
   const url=`/media/${task.id}/${crypto.randomUUID().replaceAll('-','')}/hls.m3u8`;
   record('start',{task:task.id});playerState('正在加载 HLS，等待切片与解码…');
   const fail=message=>{if(current===generation)stopPlayer(message);};
   readyTimer=setTimeout(()=>fail('等待画面超过 45 秒，已停止；检查测试源和服务端日志后重试'),45000);
-  const displayed=()=>{if(current!==generation)return;clearTimeout(readyTimer);playerState(`浏览器已显示视频帧 · ${video.videoWidth}×${video.videoHeight}`);};
+  const displayed=()=>{if(current!==generation)return;frameShown=true;displayedStreams.add(`__defaultVhost__/mgui/ui_${task.id}`);clearTimeout(readyTimer);playerState(`浏览器已显示视频帧 · ${video.videoWidth}×${video.videoHeight}`);};
   if(video.requestVideoFrameCallback)frameCallback=video.requestVideoFrameCallback(displayed);
-  video.onplaying=()=>{if(current!==generation)return;if(!video.requestVideoFrameCallback){clearTimeout(readyTimer);playerState('浏览器报告正在播放，请确认可见画面');}};
-  video.onwaiting=()=>{if(current===generation)playerState('正在缓冲，等待媒体数据…');};
+  video.onplaying=()=>{if(current!==generation)return;if(frameShown)playerState(`正在播放 · ${video.videoWidth}×${video.videoHeight}`);else if(!video.requestVideoFrameCallback){clearTimeout(readyTimer);playerState('浏览器报告正在播放，请确认可见画面');}};
+  video.onwaiting=()=>{if(current===generation)playerState(frameShown ? '已显示过视频帧；当前正在缓冲…' : '正在缓冲，等待首个视频帧…');};
   video.onerror=()=>fail(`浏览器媒体错误 ${video.error?.code ?? ''}，已停止`);
   try {
     video.muted=true;
