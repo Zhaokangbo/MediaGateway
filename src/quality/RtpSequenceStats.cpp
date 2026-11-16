@@ -1,6 +1,6 @@
 #include "mediagateway/quality/RtpSequenceStats.h"
 
-namespace mediagateway::quality {
+namespace mediagateway { namespace quality {
 
 RtpSequenceStats::RtpSequenceStats() { seen_.fill(-1); }
 
@@ -54,4 +54,4 @@ RtpSequenceStats::Result RtpSequenceStats::observe(std::uint16_t sequence) {
     return Result::InOrder;
 }
 
-} // namespace mediagateway::quality
+}} // namespace mediagateway::quality

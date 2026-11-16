@@ -9,7 +9,7 @@
 - scripts/verify-quality-live.py：受控本地 RTSP/TCP 测试源与 API 断言。
 
 上游只修改 RtspPlayer.h、RtspPlayer.cpp、server/WebApi.cpp，另在派生源码的 src/CMakeLists.txt
-追加模块包含路径和 C++17 编译要求。模块 cpp 位于 src/MediaGateway，由已有 GLOB 加入 zlmediakit。
+追加模块包含路径，继承上游 C++11 编译标准。模块 cpp 位于 src/MediaGateway，由已有 GLOB 加入 zlmediakit。
 原版 upstream/ZLMediaKit 不应用任何补丁，原版二进制不覆盖。
 
 真实链路：PlayerProxy → MediaPlayer 创建 RtspPlayerImp → RtpTrack 校验 RTP/SSRC →
@@ -50,9 +50,24 @@ JOBS=2 python3 scripts/build-quality-zlm.py
 ```
 
 不下载依赖，不改变代理。依赖上一次已完整初始化的原版源码与子模块。
+配置后检查 compile_commands.json，确保 JsonCpp、WebHook 和统计模块均使用 C++11，
+记录 cpp-standards.json；出现标准混用立即停止，避免等待到链接阶段。
 每次新建 build/zlm-quality/<UTC-PID>/source 和 cmake，可能占用数 GB，保留失败构建方便诊断。
 输入哈希、二进制 SHA256、递归子模块和可读补丁保存在 artifacts/quality-build/<UTC-PID>/。
 成功写入 runtime/builds/latest-quality.json，但不自动启动、不替换运行中的 gateway。
+
+2026-11-16 修复首次扩展构建的 JsonCpp string_view 链接错误：移除局部 PUBLIC cxx_std_17，
+将模块命名空间写法改为 C++11 兼容形式，独立测试也明确按 C++11 编译。
+之前的 11 用例通过记录针对修复前版本；修复后需重跑。
+对本次已知失败目录可安全续建，脚本检查补丁文件、模块和 CMake 块是否为已识别版本，
+且没有该目录的可执行文件运行；遇到不匹配停止，不自动覆盖用户改动：
+
+```bash
+bash scripts/test-quality.sh &&
+JOBS=2 python3 scripts/build-quality-zlm.py --resume 20261116T113124Z-4597
+```
+
+续建保留对象文件，由 CMake/Ninja 根据修改重编译；新日志仍写入新 evidence 目录。
 
 ## 切换与验收
 

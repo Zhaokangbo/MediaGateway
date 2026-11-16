@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace mediagateway::quality {
+namespace mediagateway { namespace quality {
 
 // One instance per RTP track and receive epoch, called on its owner poller.
 // No synchronization: obtain snapshots on that same poller, then copy them out.
@@ -38,4 +38,4 @@ private:
     std::int64_t first_ = -1;
 };
 
-} // namespace mediagateway::quality
+}} // namespace mediagateway::quality

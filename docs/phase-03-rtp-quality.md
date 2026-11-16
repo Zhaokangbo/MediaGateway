@@ -2,7 +2,7 @@
 
 ## 基线与范围
 
-进入核心扩展阶段。本轮新增独立 C++17 库 mg_rtp_quality 和确定性测试，
+进入核心扩展阶段。本轮新增独立库 mg_rtp_quality 和确定性测试；当前使用 C++11 与上游一致，
 不是新的媒体服务器，也不改变上游丢包/Jitter 算法。
 产物：include/mediagateway/quality/RtpSequenceStats.h、src/quality/RtpSequenceStats.cpp、
 tests/rtp_sequence_tests.cpp、根 CMakeLists.txt、scripts/test-quality.sh。
