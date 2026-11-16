@@ -18,16 +18,21 @@ ROOT = Path(__file__).resolve().parent.parent
 PORTS = {"source": (18554, 18081, 11935), "gateway": (8554, 18080, 1935)}
 
 
-def settings():
+def settings(name=None):
     lock = json.loads((ROOT / "upstream.lock.json").read_text(encoding="utf-8"))
     rev = lock["repositories"]["ZLMediaKit"]["commit"]
     src = ROOT / "upstream/ZLMediaKit"
     binary = src / "release/linux/RelWithDebInfo/MediaServer"
+    selection = ROOT / "runtime/gateway/binary-path.txt"
+    if name == "gateway" and selection.exists():
+        binary = Path(selection.read_text().strip()).resolve(strict=True)
+        if not binary.is_relative_to((ROOT / "build/zlm-quality").resolve()):
+            raise RuntimeError("Gateway binary selection is outside quality builds")
     return src, binary, rev
 
 
 def config_for(name):
-    src, binary, rev = settings()
+    src, binary, rev = settings(name)
     folder = ROOT / "runtime" / name
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = folder / "config.ini"

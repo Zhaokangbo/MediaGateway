@@ -1,0 +1,179 @@
+--- a/src/Rtsp/RtspPlayer.h
++++ b/src/Rtsp/RtspPlayer.h
+@@ -21,6 +21,8 @@
+ #include "RtspSplitter.h"
+ #include "RtpReceiver.h"
+ #include "Rtcp/RtcpContext.h"
++#include "mediagateway/quality/RtpSequenceStats.h"
++#include <array>
+ 
+ namespace mediakit {
+ 
+@@ -39,6 +41,19 @@
+     void seekTo(uint32_t pos) override;  // 新增
+     void teardown() override;
+     float getPacketLossRate(TrackType type) const override;
++
++    struct MgQualitySnapshot {
++        int track_index;
++        int track_type;
++        uint32_t ssrc;
++        uint32_t sample_rate;
++        uint64_t last_arrival_ms;
++        mediagateway::quality::RtpSequenceStats::Snapshot sequence;
++    };
++    // Owner poller only. Copies counters, never exposes mutable receive state.
++    std::vector<MgQualitySnapshot> getMgRtpQuality() const;
++    uint64_t getMgInstanceId() const { return _mg_instance_id; }
++    int getMgTransport() const { return static_cast<int>(_rtp_type); }
+ 
+     size_t getRecvSpeed() override;
+     size_t getRecvTotalBytes() override;
+@@ -217,6 +232,16 @@
+     StrCaseMap _custom_header;
+     // ssrc
+     uint32_t _ssrc[TrackMax] { };
++    struct MgQualityTrack {
++        mediagateway::quality::RtpSequenceStats sequence;
++        bool seen_ssrc = false;
++        uint32_t ssrc = 0;
++        uint32_t sample_rate = 0;
++        int track_type = -1;
++        uint64_t last_arrival_ms = 0;
++    };
++    std::array<MgQualityTrack, 2> _mg_quality;
++    uint64_t _mg_instance_id = 0;
+ };
+ 
+ } /* namespace mediakit */
+--- a/src/Rtsp/RtspPlayer.cpp
++++ b/src/Rtsp/RtspPlayer.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include "RtspPlayer.h"
++#include <atomic>
+ #include "Common/config.h"
+ #include "Rtcp/Rtcp.h"
+ #include "Rtcp/RtcpContext.h"
+@@ -36,8 +37,24 @@
+ enum PlayType { type_play = 0, type_pause, type_seek, type_speed };
+ enum class BeatType : uint32_t { both = 0, rtcp, cmd  };
+ 
++static std::atomic<uint64_t> s_mg_instance_id {0};
++
+ RtspPlayer::RtspPlayer(const EventPoller::Ptr &poller)
+-    : TcpClient(poller) {}
++    : TcpClient(poller) {
++    _mg_instance_id = ++s_mg_instance_id;
++}
++
++std::vector<RtspPlayer::MgQualitySnapshot> RtspPlayer::getMgRtpQuality() const {
++    std::vector<MgQualitySnapshot> result;
++    for (size_t i = 0; i < _mg_quality.size(); ++i) {
++        const auto &track = _mg_quality[i];
++        if (track.seen_ssrc) {
++            result.push_back({static_cast<int>(i), track.track_type, track.ssrc,
++                              track.sample_rate, track.last_arrival_ms, track.sequence.snapshot()});
++        }
++    }
++    return result;
++}
+ 
+ RtspPlayer::~RtspPlayer(void) {
+     DebugL;
+@@ -53,6 +70,11 @@
+ }
+ 
+ void RtspPlayer::teardown() {
++    for (auto &track : _mg_quality) {
++        track.sequence.reset();
++        track.seen_ssrc = false;
++        track.last_arrival_ms = 0;
++    }
+     sendTeardown();
+     _md5_nonce.clear();
+     _realm.clear();
+@@ -787,6 +809,19 @@
+ }
+ 
+ void RtspPlayer::onBeforeRtpSorted(const RtpPacket::Ptr &rtp, int track_idx) {
++    if (track_idx >= 0 && static_cast<size_t>(track_idx) < _mg_quality.size()) {
++        auto &track = _mg_quality[track_idx];
++        const auto ssrc = rtp->getSSRC();
++        if (track.seen_ssrc && track.ssrc != ssrc) {
++            track.sequence.reset();
++        }
++        track.seen_ssrc = true;
++        track.ssrc = ssrc;
++        track.sample_rate = rtp->sample_rate;
++        track.track_type = static_cast<int>(rtp->type);
++        track.last_arrival_ms = getCurrentMillisecond();
++        track.sequence.observe(rtp->getSeq());
++    }
+     auto &rtcp_ctx = _rtcp_context[track_idx];
+     rtcp_ctx->onRtp(rtp->getSeq(), rtp->getStamp(), rtp->ntp_stamp, rtp->sample_rate, rtp->size() - RtpPacket::kRtpTcpHeaderSize);
+ 
+--- a/server/WebApi.cpp
++++ b/server/WebApi.cpp
+@@ -45,6 +45,7 @@
+ #include "Http/HttpSession.h"
+ #include "Http/HttpRequester.h"
+ #include "Player/PlayerProxy.h"
++#include "Rtsp/RtspPlayer.h"
+ #include "Pusher/PusherProxy.h"
+ #include "Rtp/RtpProcess.h"
+ #include "Record/MP4Reader.h"
+@@ -1335,6 +1336,52 @@
+     // Dynamically add rtsp/rtmp pull stream proxy
+     // 测试url http://127.0.0.1/index/api/addStreamProxy?vhost=__defaultVhost__&app=proxy&enable_rtsp=1&enable_rtmp=1&stream=0&url=rtmp://127.0.0.1/live/obs  [AUTO-TRANSLATED:71ddce15]
+     // Test url http://127.0.0.1/index/api/addStreamProxy?vhost=__defaultVhost__&app=proxy&enable_rtsp=1&enable_rtmp=1&stream=0&url=rtmp://127.0.0.1/live/obs
++    // MediaGateway: only API-created pull proxies, read on the receive owner poller.
++    api_regist("/index/api/getProxyRtpQuality", [](API_ARGS_MAP_ASYNC) {
++        CHECK_SECRET();
++        CHECK_ARGS("key");
++        std::string key = allArgs["key"];
++        auto proxy = s_player_proxy.find(key);
++        if (!proxy) {
++            throw ApiRetException("can not find the stream proxy", API::NotFound);
++        }
++        proxy->getPoller()->async([=]() mutable {
++            auto rtsp = std::dynamic_pointer_cast<RtspPlayer>(proxy->getDelegate());
++            auto &data = val["data"];
++            data["key"] = key;
++            data["supported"] = static_cast<bool>(rtsp);
++            data["scope"] = "application_pre_sort";
++            data["metrics_version"] = 1;
++            data["tracks"] = Json::Value(Json::arrayValue);
++            if (rtsp) {
++                data["instance_id"] = Json::UInt64(rtsp->getMgInstanceId());
++                data["transport"] = rtsp->getMgTransport();
++                data["proxy_status"] = proxy->getStatus();
++                const auto now = getCurrentMillisecond();
++                for (const auto &track : rtsp->getMgRtpQuality()) {
++                    const auto &s = track.sequence;
++                    Json::Value item;
++                    item["track_index"] = track.track_index;
++                    item["track_type"] = track.track_type;
++                    item["ssrc"] = Json::UInt64(track.ssrc);
++                    item["sample_rate"] = track.sample_rate;
++                    item["sample_age_ms"] = Json::UInt64(now >= track.last_arrival_ms ? now - track.last_arrival_ms : 0);
++                    item["epoch"] = Json::UInt64(s.epoch);
++                    item["received"] = Json::UInt64(s.received);
++                    item["unique"] = Json::UInt64(s.unique);
++                    item["reordered"] = Json::UInt64(s.reordered);
++                    item["duplicates"] = Json::UInt64(s.duplicates);
++                    item["too_old"] = Json::UInt64(s.too_old);
++                    item["discontinuities"] = Json::UInt64(s.discontinuities);
++                    item["highest_extended"] = Json::Int64(s.highest_extended);
++                    item["window"] = 1024;
++                    data["tracks"].append(item);
++                }
++            }
++            invoker(200, headerOut, val.toStyledString());
++        });
++    });
++
+     api_regist("/index/api/addStreamProxy",[](API_ARGS_MAP_ASYNC){
+         CHECK_SECRET();
+         CHECK_ARGS("vhost","app","stream","url");
